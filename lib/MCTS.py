@@ -1,15 +1,6 @@
 import queue
 import multiprocessing
-
-# class ModelHook:
-#     '''The translator object for connecting to the model.'''
-#     def __init__(self):
-#         '''None'''
-#         pass
-    
-#     def tensorify(epd):
-#         '''None'''
-#         pass
+import numpy as np
 
 class MCTSNode:
     '''The node object for the MCTS tree.'''
@@ -20,11 +11,11 @@ class MCTSNode:
             state (str): A string in epd format representing the chess board state.'''
         self.content = state + '#0%0'
 
-    def update(self,result):
+    def update(self,results):
         '''This method updates the visit and win part of the node.
         
         Parameters:
-            result (bool): A boolean value, true if won simulation, false if loss or draw.'''
+            results (array): An array of Booleans, true if won simulation, false if loss or draw.'''
         
         '''Get necessary string indices only one to save time'''
         ht_idx = self.content.find('#')
@@ -32,9 +23,9 @@ class MCTSNode:
         
         '''Increment visits and wins based on result (result from the viewpoint of the root node color)'''
         if result:
-            self.content[ht_idx+1:] = '#'+str(int(self.content[ht_idx+1:sp_idx])+1)+'/'+str(int(self.content[sp_idx+1:])+1)
+            self.content[ht_idx+1:] = '#'+str(int(self.content[ht_idx+1:sp_idx])+len(results))+'/'+str(int(self.content[sp_idx+1:])+results.count(True))
         else:
-            self.content[ht_idx+1:] = '#'+str(int(self.content[ht_idx+1:sp_idx])+1)+'/'+str(int(self.content[sp_idx+1:]))
+            self.content[ht_idx+1:] = '#'+str(int(self.content[ht_idx+1:sp_idx])+len(results))+'/'+str(int(self.content[sp_idx+1:]))
     
     def epd(self):
         '''Returns the epd encoded board state string.'''
@@ -63,13 +54,14 @@ class MCTSTree:
         self.node_limit (int): If the number of nodes exceeds this value the build method will terminate.
         self.modus (str): The mode in which MCTS is run, determines simulation result, allowed are "Deep", "Random", "Informed".'''
     
-    def __init__(self,root_state,mode='Deep',node_limit=10**5):
+    def __init__(self,root_state,mode='Deep',node_limit=10**5,exp_const=1):
         '''Creates initial tree object with attributes and the root node.
         Parameters:
             root_state (str): A string in epd format representing the root chess board state. 
             mode (str): Mode for the simulation method "Deep", "Random", "Informed".
             node_limit (int): Upper limit for the node count in the tree.'''
         self.tree = {'0x0' : MCTSNode(root_state)}
+        self.UCB_ranking = lambda parent, children: [children[i].wins / children[i].visits + exp_const * np.sqrt(2 * np.log(parent.visits)/children[i].visits) for i in range(len(children))]
     
     def build(self,condition=None):
         '''Extends the search tree until the condition is met.
@@ -83,7 +75,9 @@ class MCTSTree:
         
     def find_n_most_promising_leafs(self):
         pass
+#         cpu = 
+#         leaf_addresses = []
+#         while len(leaf_addresses) < 
     
     def simulation(self,node_address):
         pass
-    
