@@ -21,6 +21,10 @@ This repository will, when the project is finalized, contain:
 ## Setup
 Will be added soon.
 
+## Structure
+Will be added soon.
+![Current project structure plan](images/project_structure.png)
+
 ## Contact
 Marlon Dammann <<mdammann@uni-osnabrueck.de>>
 
