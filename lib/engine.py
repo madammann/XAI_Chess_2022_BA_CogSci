@@ -2,6 +2,10 @@ import chess
 import tensorflow as tf
 import numpy as np
 
+class IllegalMoveError(Exception):
+    def __init__(self, string):
+        pass
+
 class PNG:
     def __init__(self):
         pass
@@ -32,7 +36,7 @@ class ChessGame:
             '''Add current board tensor to the tensor history'''
             self.tensor_history += [self.board_tensor()]
         else:
-            raise InputError('Selected move is illegal on this board.')
+            raise IllegalMoveError('Selected move is illegal on this board.')
             
     def get_repetition_count(self, key):
         if key in list(self.repetitions.keys()):
@@ -63,7 +67,7 @@ class ChessGame:
         tensor = np.dstack(tensor)
         
         '''Flip the board tensor horizontally if black is to move'''
-        if board.turn == chess.BLACK:
+        if self.board.turn == chess.BLACK:
             tensor = np.flip(tensor,axis=0)
         
         return tensor
