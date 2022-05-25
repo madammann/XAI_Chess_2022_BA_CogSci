@@ -6,7 +6,8 @@ class ResidualLayer(tf.keras.Model):
         self.conv = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same')
         self.batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
-    
+        
+    @tf.function
     def call(self, x, training=False):
         x_skip = x
         x = self.conv(x)
@@ -22,7 +23,8 @@ class ConvolutionalStem(tf.keras.Model):
         self.initial_batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         self.residual_layers = [ResidualLayer() for _ in range(residual_size-1)]
-    
+        
+    @tf.function
     def call(self, x, training=False):
         x = self.initial_cnn_layer(x)
         x = self.initial_batch_norm(x,training=training)
@@ -41,6 +43,7 @@ class ValueHead(tf.keras.Model):
         self.hidden = tf.keras.layers.Dense(256,activation='relu')
         self.value = tf.keras.layers.Dense(1,activation='tanh')
         
+    @tf.function
     def call(self, x, training=False):
         x = self.single_filter_conv(x)
         x = self.batch_norm(x,training=training)
@@ -56,16 +59,28 @@ class PolicyHead(tf.keras.Model):
         self.two_filter_conv = tf.keras.layers.Conv2D(filters=2,kernel_size=1,strides=1,padding='same')
         self.batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
+        self.policy_layer = tf.keras.layers.Conv2D(filters=73,kernel_size=1,strides=1,padding='same')
         self.flatten = tf.keras.layers.Flatten()
-        self.policy_layer = tf.keras.layers.Dense(8*8*73,activation='softmax')
-        
+        self.softmax = tf.keras.activations.softmax
+    
+    @tf.function
     def call(self, x, training=False):
         x = self.two_filter_conv(x)
         x = self.batch_norm(x,training=training)
         x = self.ReLU(x)
-        x = self.flatten(x)
         x = self.policy_layer(x)
-        x = tf.reshape(x, shape=(x.shape[0],8,8,73))
+        batch_size = x.shape[0]
+        if batch_size > 1:
+            x = tf.split(x,batch_size)
+            for b in range(batch_size):
+                x[b] = self.flatten(x[b])
+                x[b] = self.softmax(x[b])
+                x[b] = tf.reshape(x[b],shape=(1,8,8,73))
+            x = tf.concat([x],axis=0)
+        else:
+            x = self.flatten(x)
+            x = self.softmax(x)
+            x = tf.reshape(x,shape=(1,8,8,73))
         return x
 
 class ChessModel(tf.keras.Model):
@@ -74,7 +89,8 @@ class ChessModel(tf.keras.Model):
         self.convolutional_stem = ConvolutionalStem()
         self.value_head = ValueHead()
         self.policy_head = PolicyHead()
-    
+        
+    @tf.function
     def call(self, x, training=False):
         x = self.convolutional_stem(x,training=training)
         val = self.value_head(x,training=training)
