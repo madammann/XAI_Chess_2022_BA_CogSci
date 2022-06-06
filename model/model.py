@@ -19,7 +19,7 @@ class ResidualLayer(tf.keras.Model):
 class ConvolutionalStem(tf.keras.Model):
     def __init__(self,residual_size=6):
         super(ConvolutionalStem, self).__init__()
-        self.initial_cnn_layer = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same')
+        self.initial_cnn_layer = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same',input_shape=(None,8,8,None))
         self.initial_batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         self.residual_layers = [ResidualLayer() for _ in range(residual_size-1)]

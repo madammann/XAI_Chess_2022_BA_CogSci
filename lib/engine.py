@@ -44,14 +44,14 @@ class ChessGame:
             
                 self.possible_moves = [move.uci() for move in self.board.legal_moves]
     
-    def play_move_chain(self, initial_moves):
-        '''Plays all initial moves efficiently.'''
+    def play_move_chain(self, moves):
+        '''Plays all moves efficiently.'''
         
-        for i in range(len(initial_moves)):
-            if (len(initial_moves) - i) > self.T:
-                self.select_move(initial_moves[i],history=False) #do not create unecessary tensors for elements not in the range of T
+        for i in range(len(moves)):
+            if (len(moves) - i) > self.T:
+                self.select_move(moves[i],history=False) #do not create unecessary tensors for elements not in the range of T
             else:
-                self.select_move(initial_moves[i])
+                self.select_move(moves[i])
     
     def board_tensor(self):
         '''Creates a tensor of the current board state which includes piece positions and repitition count.'''
@@ -109,7 +109,7 @@ class ChessGame:
         if self.board.turn == chess.BLACK:
             tensor = np.flip(tensor,axis=0) # We can flip the entire tensor since the rule dimensions are uniform (np.full)
         
-        return tf.constant(tensor,dtype='float32')
+        return tf.expand_dims(tf.constant(tensor,dtype='float32'),axis=0)
     
     def get_result(self) -> tuple:
         '''Returns a tuple of length 2 with values 1:win,0:draw,-1:loss for each side if the game is over.'''
@@ -237,7 +237,7 @@ def policy_argmax_choice(policy_tensor : np.ndarray, legal_moves : list,flipped=
     '''Finds the first legal move with highest likelyhood in the policy output tensor numpy array with shape=(8,8,73).'''
 
     '''Argsorts policy_tensor'''
-    moves = policy_tensor.copy()
+    moves = np.squeeze(policy_tensor,axis=0)
     moves = moves.flatten()
     moves = np.argsort(moves)[::-1]
     
