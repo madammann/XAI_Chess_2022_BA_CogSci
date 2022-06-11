@@ -15,6 +15,7 @@ class ChessGame:
         self.board = chess.Board()
         self.T = T
         self.terminal = False
+        self.result = None
         
         if initial_moves == []:
             self.possible_moves = [move.uci() for move in self.board.legal_moves]
@@ -26,13 +27,51 @@ class ChessGame:
     
     def select_move(self, move_uci, history=True):
         '''Push move assuming only legal moves are pushed.'''
+        
+        #TODO Improve this coding structure
         if not self.terminal:
-            self.board.push(chess.Move.from_uci(move_uci))
+            try:
+                self.board.push(chess.Move.from_uci(move_uci))
+            except:
+                if move_uci == 'claim draw':
+                    if self.board.is_fifty_moves():
+                        self.terminal = True
+                        self.result = (0,0)
+                        
+                    elif self.board.is_repetition(3):
+                        self.terminal = True
+                        self.result = (0,0)
             
-            
-            '''TODO: DO FURTHER TERMINAL RULES HERE!'''
-            if self.board.is_game_over():
+            # the game is only counted as terminal if no move could change the result of the game
+            if self.board.is_checkmate():
                 self.terminal = True
+                
+                result = self.board.result()
+                if result == '1-0':
+                    self.result = (1,0)
+                
+                if result == '0-1':
+                    self.result = (0,1)
+                
+            # the game is stalemate, meaning there is no move for one side and also no check
+            elif self.board.is_stalemate():
+                self.terminal = True
+                self.result = (0,0)
+            
+            # the game is a forced draw if there is a fivefold repetition according to the "new" draw FIDE rules
+            elif self.board.is_fivefold_repetition():
+                self.terminal = True
+                self.result = (0,0)
+                
+            # the game is a forced draw if 75 progressless moves were made, according to the "new" draw FIDE rules
+            elif self.board.is_seventyfive_moves():
+                self.terminal = True
+                self.result = (0,0)
+            
+            # the game is a forced draw if only kings are left on the board, meaning insufficient material in any case    
+            elif not ('P' or 'p' or 'N' or 'n' or 'B' or 'b' or 'R' or 'r') in self.board.epd():
+                self.terminal = True
+                self.result = (0,0)
         
             '''Designed to skip creating unecessary tensors in case of playing an initial move chain in self.__init__'''
             if history:
@@ -61,7 +100,7 @@ class ChessGame:
             for piece in [chess.PAWN,chess.ROOK,chess.KNIGHT,chess.BISHOP,chess.QUEEN,chess.KING]:
                 tensor += [np.array(self.board.pieces(piece,color).tolist()).reshape(8,8,1)]
         
-        '''TODO: Implement the repitition for opposite color board or leave it like this'''
+        '''TODO: Implement the repetition for opposite color board or leave it like this'''
         '''Get the current board repetition count in the most convenient way'''
         rep = 1
         while not self.board.is_repetition(rep):
@@ -113,14 +152,8 @@ class ChessGame:
     
     def get_result(self) -> tuple:
         '''Returns a tuple of length 2 with values 1:win,0:draw,-1:loss for each side if the game is over.'''
-        if self.terminal:
-            result = self.board.result()
-            if result == '1/2-1/2':
-                return (0,0)
-            if result == '1:0':
-                return (1,0)
-            if result == '0:1':
-                return (0,1)
+        if self.result != None:
+            return self.result
     
 '''Move embedding to uci conversion functions'''
 
