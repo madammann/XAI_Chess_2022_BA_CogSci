@@ -1,7 +1,6 @@
 import chess
 import numpy as np
 import tensorflow as tf
-from tqdm import tqdm
 from multiprocessing.pool import ThreadPool
 from copy import deepcopy
 
@@ -123,11 +122,6 @@ class MctsNode:
             self.children += children
         else:
             self.children = children
-            
-# TODO1: Update docstrings again
-# TODO2: Implement tqdm functionality for eval mode
-# TODO3: ChessModel functionality with input tensor
-# TODO4: ChessGame .terminal and .result adjustment for checkmate and special rules only
 
 class MctsTree:
     '''
@@ -158,13 +152,44 @@ class MctsTree:
         
         return len(self.tree.values())
     
-#     def __str__(self):
-#         '''ADD'''
-#         pass
+    def __str__(self):
+        '''
+        ADD
+        '''
+        
+        string = f'{str(self.tree[0])}('
+        
+        for index in self.tree[0].children:
+            string += f'{str(self.tree[index])}('
+            for d in self.tree[index].children:
+                string += f'{self.tree[d]})'
+        
+        string += f')'
+        
+        return string
+            
     
-#     def __contains__(self, obj):
-#         '''ADD'''
-#         pass
+    def __contains__(self, node):
+        '''
+        ADD
+        '''
+        
+        if type(node) != MctsNode or str:
+            raise ValueError('Object can only contain MctsNode objects or move strings.')
+        
+        if type(node) == str:
+            for val in self.tree.values():
+                if node == val.move:
+                    return True
+            
+            return False
+        
+        if type(node) == MctsNode:
+            for val in self.tree.values():
+                if node == val:
+                    return True
+            
+            return False
 
     def merge_subtrees(self, subtrees : list, update=True):
         '''
@@ -175,17 +200,18 @@ class MctsTree:
         if update:
             for subtree in subtrees:
                 self.update(subtree[0].parent,subtree[0].wins,subtree[0].visits)
-                
-        # test if any subtree roots are identical, if none are proceed to base case, else recursive call
-        if any([val for elem in [[subtrees[i][0] == subtrees[j][0] for j in range(len(subtrees)) if i != j] for i in range(len(subtrees))] for val in elem]):
-            # step 2.1 : find all pairs of indices of subtrees which have an identical root node
-            identical_roots = []
+
+        # step 2.1 : find all pairs of indices of subtrees which have an identical root node
+        identical_roots = []
+        if len(subtrees) >= 2:
             for i, tree_a in enumerate(subtrees):
                 for j, tree_b in enumerate(subtrees):
                     if i != j and not (j,i) in identical_roots:
                         if tree_a[0] == tree_b[0]:
                             identical_roots += [(i,j)]
         
+        # test if any subtree roots are identical, if none are proceed to base case, else recursive call
+        if len(identical_roots) > 0:
             # step 2.2 : create a final list of subtree index pairs which is non-repetitive
             # code credited to TemporalWolf from StackOverflow
             # https://stackoverflow.com/questions/42036188/merging-tuples-if-they-have-one-common-element
@@ -210,21 +236,23 @@ class MctsTree:
             identical = [subtrees[i] for i in range(len(subtrees)) if i in identical]
             non_identical = [subtrees[i] for i in range(len(subtrees)) if i in non_identical]
             
-            # step 3.2 : merge non-identical subtrees onto tree
-            keys = np.add(range(np.sum([len(subtree) for subtree in non_identical])),len(self),dtype='int16')
-            pos = 0
+            # step 3.2 : merge non-identical subtrees onto tree if present
+            keyrange_sum = np.sum([len(subtree) for subtree in non_identical])
+            if keyrange_sum > 0:
+                keys = np.add(range(keyrange_sum),len(self))
+                pos = 0
             
-            for subtree in non_identical:
-                for k,node in subtree.items():
-                    self.tree[subtree[k].parent].update_children(children=[keys[pos]])
-                    self.tree[keys[pos]] = node # write node to tree
-                    self.tree[keys[pos]].update_children([],overwrite=True)
-                    if k+1 < len(subtree):
-                        subtree[k+1].update_parent(parent=keys[pos]) # upodate original subtree child parent index
-                    pos += 1
+                for subtree in non_identical:
+                    for k,node in subtree.items():
+                        self.tree[subtree[k].parent].update_children(children=[keys[pos]])
+                        self.tree[keys[pos]] = node # write node to tree
+                        self.tree[keys[pos]].update_children([],overwrite=True)
+                        if k+1 < len(subtree):
+                            subtree[k+1].update_parent(parent=keys[pos]) # upodate original subtree child parent index
+                        pos += 1
             
             # step 3.3 : merge identical subtree roots and adjust the remaindure properly
-            keys = np.add(range(len(identical_roots)),len(self),dtype='int16') # create the keys for writing to self.tree
+            keys = np.add(range(len(identical_roots)),len(self)) # create the keys for writing to self.tree
             
             subtree_roots = {i : None for i in range(len(identical_roots))}
             for i, pair in enumerate(identical_roots):
@@ -261,7 +289,7 @@ class MctsTree:
             self.merge_subtrees(identical,update=False)
             
         else:
-            keys = np.add(range(np.sum([len(subtree) for subtree in subtrees])),len(self),dtype='int16')
+            keys = np.add(range(np.sum([len(subtree) for subtree in subtrees])),len(self))
             pos = 0
             
             for subtree in subtrees:
@@ -292,13 +320,8 @@ class MctsTree:
         # we chose the node with highest visit and win count for the player to play
         if wins[0] == visits[0]:
             return children[visits[0]].move
-        
-        # TODO: Maybe change this to be literature based or find literature to back this method
-        # if no node has both highest visit count and highest win count we select the node with higher win count if it is at least an epsilon distance from the next best
-        if (children[wins[0]] - children[wins[1]]) / (node_a[0] + node_b[0]) > epsilon:
-            return children[wins[0]].move
-        
-        # if we can still not find a best node we select the one with highest visit count
+
+        # if there is no single node with both highest win and visit we chose the most visited node
         return children[visits[0]].move
     
     def chainmove(self,node,chain=[]):
@@ -316,7 +339,7 @@ class MctsTree:
         else:
             return chain[::-1] # reverse for proper order
         
-    def __call__(self,obj, iter_lim=100, node_lim=10e8, gpi=800, T=8, c=2, epsilon=0.005, argmax=True):
+    def __call__(self,obj, iter_lim=100, node_lim=10e7, gpi=100, T=8, c=2, epsilon=0.005, argmax=True):
         '''
         Starts the tree policy in a specified mode given a set of parameters.
         :param obj: model.ChessModel or heuristics.EvaluationFunction or None.
@@ -330,8 +353,12 @@ class MctsTree:
         
         iteration = 0
         
+        if node_lim >= 10e7:
+            node_lim = 10e7
+        if gpi >= 1000:
+            gpi = 1000
+        
         if type(obj) == ChessModel:
-            
             # define termination function based on game termination (t), iterations (i) and tree size (s)
             terminate = lambda t,i,s: any([all(t),i>=iter_lim,s>=node_lim])
             
@@ -355,10 +382,7 @@ class MctsTree:
                     
                 iteration += 1
             
-            # ADD MORE HERE (return values for training and do some cleanup)
-            
         else:
-            # ADD
             terminate = lambda i,s: any([i>=iter_lim,s>=node_lim])
             
             while not terminate(iteration,len(self.tree.keys())):
@@ -372,11 +396,7 @@ class MctsTree:
                 subtrees = ThreadPool(gpi).starmap(self.build_eval,args) # we execute in non-async since we need to await the result anyway for the next step
                 self.merge_subtrees(subtrees)
                 
-                # ADD MORE HERE (TBD)
-                
                 iteration += 1
-                
-            # ADD MORE HERE (return best move and more and do some cleanup)
                 
     def build_model(self, start_idx : int, subtree : dict, model : ChessModel, c=2, choices=1, T=8, epsilon=0.005) -> dict:
         '''
@@ -430,19 +450,6 @@ class MctsTree:
             if choice != None:
                 node_idx = self.tree[node_idx].children[choice]
                 game.select_move(self.tree[node_idx].move) # plays the move of the selected child in the copied game instance
-
-                
-# EXPAND METHOD CURRENTLY UNUSED, may implement in merge op
-
-#     def expand(self, parent_idx : int, move : str, key : int):
-#         '''
-#         Creates a MctsNode with an index key.
-#         :param parent_idx (int): The index of the parent to be.
-#         :param move (str): A chess move string in uci format.
-#         :param key (int): An integer index which will be the key for the node value.
-#         '''
-#         self.tree[key] = MctsNode(move,parent_idx)
-#         self.tree[parent_idx].children += [key]
     
     def select(self, game : ChessGame, idx : int, subtree : dict, c=2, choices=1) -> tuple:
         '''
@@ -576,15 +583,16 @@ class MctsTree:
         for key in subtree.keys():
             subtree[key].update(delta, 1)
     
-    def update(self,idx,delta : tuple, visits : int):
+    def update(self, start_idx : int, delta : tuple, visits : int):
         '''
         Updates a node with a delta result and propagates the result to all its parents.
         :param node (int): The index of the node to update.
         :param delta (tuple): An update tuple to be applied to the node and its parents.
         '''
         
-        if idx != 0:
-            self.tree[idx].update(delta, visits)
-            self.update(self.tree[idx].parent, delta, visits)
-        else:
-            self.tree[idx].update(delta, visits)
+        index_chain = [start_idx]
+        while not 0 in index_chain:
+            index_chain += [self.tree[index_chain[-1]].parent]
+        
+        for index in index_chain:
+            self.tree[index].update(delta, visits)

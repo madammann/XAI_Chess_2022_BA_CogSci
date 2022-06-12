@@ -148,6 +148,12 @@ class ChessGame:
         if self.board.turn == chess.BLACK:
             tensor = np.flip(tensor,axis=0) # We can flip the entire tensor since the rule dimensions are uniform (np.full)
         
+        
+        # if the output tensor's shape would be smaller than intended it is filled with zero-valued layers
+        if tensor.shape[2] < self.T * 13 + 7:
+            tensor = np.dstack([tensor,np.dstack([np.full((8,8,1),0)]*(self.T * 13 + 7 - tensor.shape[2]))])
+            print(tensor.shape)
+            
         return tf.expand_dims(tf.constant(tensor,dtype='float32'),axis=0)
     
     def get_result(self) -> tuple:
