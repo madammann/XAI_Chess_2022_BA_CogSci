@@ -73,7 +73,7 @@ class MctsNode:
             if self.wins[0] == 1:
                 return f'Node({self.move},(inf,-inf),{self.visits})'
             
-            elif self.wins[0] == -1:
+            elif self.wins[1] == 1:
                 return f'Node({self.move},(-inf,inf),{self.visits})'
             
             else:
@@ -218,6 +218,7 @@ class MctsTree:
     
     :att tree (dict): A dictionary of index and MctsNode pairs which represents the search tree.
     :att root_state (ChessGame): A copied ChessGame instance used as initial state for generating the tree.
+    :att game_results: This attribute is either a list of node indices indicating the end state of all games during model-based execution or None.
     '''
     
     def __init__(self, game):
@@ -230,6 +231,7 @@ class MctsTree:
         
         self.tree = {0 : MctsNode(None,None)}
         self.root_state = deepcopy(game)
+        self.game_results = None
     
     def from_repr(game : str, tree : str):
         '''
@@ -467,7 +469,7 @@ class MctsTree:
         # if there is no single node with both highest win and visit we chose the most visited node
         return children[visits[0]].move
     
-    def chainmove(self, idx, chain=[]):
+    def move_chain(self, idx, chain=[]):
         '''
         Retrieves a list of uci-encoded move strings in order of play for reconstructing the game sequence.
         
@@ -479,13 +481,32 @@ class MctsTree:
         # recursive case if not yet at root
         if idx != 0:
             chain += [self.tree[idx].move]
-            self.chainmove(self.tree[idx].parent,chain=chain)
+            self.move_chain(self.tree[idx].parent,chain=chain)
             
         else:
             # base case if "idx == 0"
             return chain[::-1] # reverse for proper order
+    
+    def node_chain(self, idx, chain=[]):
+        '''
+        Retrieves a list of node indices for reconstructing the game sequence.
         
-    def __call__(self, obj, iter_lim=100, games=16, node_lim=5e8, c=2, argmax=True, epsilon=0.005):
+        :param idx (int): The integer index of the node from where to start backpropagating nodes.
+        :param chain (list): A list used for recursive calls, contains current move list in reversed order.
+        :returns (list): A list of node reference indices in order of occurance.
+        '''
+        
+        # recursive case if not yet at root
+        if idx != 0:
+            chain += [idx]
+            self.node_chain(self.tree[idx].parent,chain=chain)
+            
+        else:
+            # base case if "idx == 0"
+            chain += [0]
+            return chain[::-1] # reverse for proper order
+        
+    def __call__(self, obj, iter_lim=100, games=32, node_lim=5e8, c=2, argmax=True, epsilon=0.005):
         '''
         Method for building the MCTS search tree for a specified duration.
         If an instance of this class is called the tree will be built and stored in self.tree and a best move from root will be returned afterwards.
@@ -505,6 +526,8 @@ class MctsTree:
         :param argmax (bool): True if select should always return highest UCBT-ranked node, False if a random weighted choice should be made.
         :param epsilon (float): Hyperparameter representing the chance of selecting a random move instead during simulation.
         
+        Input parameters are not checked or clipped, they need to be correctly inputted!
+        
         Example usage with "preferred" settings:
         mcts_tree(None, iter_lim=1000, games=64) -> Does random simulations with, ideally, 64 threads per iteration up to 1000 iterations.
         mcts_tree(EvaluationFunction, iter_lim=500, games=32, epsilon=0.01) -> Uses an evaluation function with, ideally, 32 threads per iteraton and slightly higher epsilon for up to 500 iterations.
@@ -513,58 +536,59 @@ class MctsTree:
         
         iteration = 0
         
-        if node_lim >= 5e8:
-            node_lim = 5e8
-            
-        if games >= 1000 and type(obj) != ChessModel:
-            games = 1000
-            
-        elif games >= 32 and type(obj) == ChessModel:
-            games = 32
-        
         if type(obj) == ChessModel:
-            # define termination function based on game termination (t), iterations (i) and tree size (s)
+            # definition of termination criterion as having completed all games, reaching the iteration limit, or reaching the node limit
             terminate = lambda t,i,s: any([all(t),i>=iter_lim,s>=node_lim])
+            
+            # create a game pointer for each game which points to the root node
             game_pointer = [0 for _ in range(games)]
             
             while not terminate([self.tree[ptr].proven for ptr in game_pointer],iteration,len(self.tree.keys())):
+                # if argmax is not chosen we define for each pointer the amount of nodes to consider for weighted random choice in UCBT for higher game divergence probability 
                 if not argmax:
                     choices = [game_pointer.count(ptr) for ptr in game_pointer] # sets choices for each game branch to the number of identical game branches
                     
                 else:
                     choices = [1 for ptr in game_pointer]
-                args = [(ptr,{},model,c,choices[i],epsilon) for i, ptr in enumerate(game_pointer)]
+                    
+                # we define arguments for each thread and also only include the non-terminal games
+                args = [(ptr,{},model,c,choices[i],epsilon) for i, ptr in enumerate(game_pointer) if not self.tree[ptr].proven]
                 
-                # we play gpi games before we select the next move for each game pointer
-                for _ in range(gpi):
-                    subtrees = ThreadPool(len(game_pointer)).starmap(self.build_model,args) # we execute in non-async since we need to await the result anyway for the next step
+                # we play 800 games before we select the next move for each game pointer, all 800 games per batch are played on the same tree
+                for _ in range(800):
+                    subtrees = ThreadPool(len(args)).starmap(self.build_model,args) # we execute in non-async since we need to await the result anyway for the next step
                     self.merge_subtrees(subtrees)
                 
                 # make the best move for each game according to tree and prune branches which will never be visited again
                 game_pointer = [self.bestmove(ptr) for ptr in game_pointer]
                 self.prune()
-                
-                # ADD MORE HERE (TBD)
                     
-                iteration += 1
+                iteration += 1 # in this context an iteration is one move in each non-terminal game
+            
+            # finally store the game pointer in game_results for model training
+            self.game_results = game_pointer
             
         else:
+            # definition of termination criterion as reaching the iteration limit or the node limit
             terminate = lambda i,s: any([i>=iter_lim,s>=node_lim])
             
-            while not terminate(iteration,len(self.tree.keys())):
+            while not terminate(iteration,len(self)):
                 if not argmax:
                     choices = 2
                     
                 else:
                     choices = 1
                     
-                args = [(0,{},obj,c,choices,epsilon) for i in range(gpi)]
+                # in each iteration we do selection, expansion, simulation for games number of threads before we merge
+                args = [(0,{},obj,c,choices,epsilon) for i in range(games)]
+                subtrees = ThreadPool(games).starmap(self.build_eval,args) # we execute in non-async since we need to await the result anyway for the next step
                 
-                # we play gpi games before we select the next move for each game pointer
-                subtrees = ThreadPool(gpi).starmap(self.build_eval,args) # we execute in non-async since we need to await the result anyway for the next step
                 self.merge_subtrees(subtrees)
                 
                 iteration += 1
+        
+        # in any case return the best move from root after termination
+        return self.bestmove(0)
                 
     def build_model(self, start_idx : int, subtree : dict, model, c=2, choices=1, epsilon=0.005) -> dict:
         '''
@@ -582,15 +606,13 @@ class MctsTree:
         :returns (dir): The subtree dictionary to fuse with the parent tree.
         '''
         
-        game = deepcopy(self.root_state) # creates a deepcopy of the tree's root state for further manipulation.
+        game = deepcopy(self.root_state) # creates a deepcopy of the tree's root state for further manipulation
         
         self.tree_policy(game, start_idx, subtree, c=c, choices=choices)
         
+        # do a simulation only if the node from which to simulate is not a proven node
         if not subtree[0].proven:
             self.simulate_model(game, model, subtree, epsilon=epsilon)
-            
-        else:
-            pass # ADD MORE HERE (case proven node, also return empty dict!)
         
         return subtree
     
@@ -610,15 +632,13 @@ class MctsTree:
         :returns (dir): The subtree dictionary to fuse with the parent tree.
         '''
         
-        game = deepcopy(self.root_state)
+        game = deepcopy(self.root_state) # creates a deepcopy of the tree's root state for further manipulation
         
         self.tree_policy(game, start_idx, subtree, c=c, choices=choices)
         
+        # do a simulation only if the node from which to simulate is not a proven node
         if not subtree[0].proven:
             self.simulate_eval(game, eval_func, subtree, epsilon=epsilon)
-            
-        else:
-            pass # ADD MORE HERE (case proven node, also return empty dict!)
         
         return subtree
     
@@ -649,21 +669,33 @@ class MctsTree:
     
     def select(self, game, idx : int, subtree : dict, c=2, choices=1) -> tuple:
         '''
-        CONTINUE DOCSTRING UPDATE HERE!
-        Selects the child of the parent to be moved to or selects the parent if it is a proven node.
-        The select function will traverse the tree until it finds a suitable leaf node to do a simulation on.
+        The method for the selection step of MCTS.
+        From a starting index this method traverses self.tree down until it either hits a node which has unexplored children or a terminal node.
+        
+        The following occurances are handled:
+        Case 1 : Select was called on a proven node. 
+        Case 2 : Select was called on a node which has all children and all are proven.
+        Case 3 : Select was called on a node which has unexplored children. 
+        Case 4 : Select was called on a node which has no unexplored children.
+        
+        The following subtree and return values are created for each case:
+        Case 1 -> returns (index=None, repeat=False), subtree={0 : MctsNode} where MctsNode is the proven node from self.tree[idx]
+        Case 2 -> returns (index=None, repeat=False), subtree={0 : MctsNode} where MctsNode is the parent of all proven nodes and XYZ
+        Case 3 -> returns (index=None, repeat=False), subtree={0 : MctsNode} where MctsNode is a newly created child node of self.tree[idx].
+        Case 4 -> returns (index=int, repeat=True), subtree={}
         
         :param game (ChessGame): The ChessGame instance to use for obtaining possible moves and player turn.
         :param idx (int): The index of the node to select a child from.
         :param subtree (dict): The subtree to write to if a new node is created, later merged into self.tree.
         :param c (float): The exploration constant to be used in the UCBT formula.
         :param choices (int): Enables a weighted random choice between the highest n ranked children instead of the maximum child.
-        :returns (tuple): Returns a tuple consisting of an int or None and a boolean value.
+        :returns (tuple): Returns a tuple consisting of index and repeat value, index is None or int, repeat is boolean.
         '''
         
         # tests whether node from which to select is a proven node in which case None is returned.
         if self.tree[idx].proven:
             subtree[0] = self.tree[idx]
+            
             return None, False
         
         color = 0 if game.board.turn else 1 # 0 : white, 1 : black
@@ -674,12 +706,15 @@ class MctsTree:
             
             if best == 1:
                 self.tree[idx].prove(0 if color else 1) # result is proven win for white
+                
             elif best == -1:
                 self.tree[idx].prove(1 if color else 0) # result is proven win for black
+                
             elif best == 0:
                 self.tree[idx].prove(2) # result is draw
             
             subtree[0] = self.tree[idx]
+            
             return None, False
         
         # tests whether not all children were created yet, if true it creates a random remaining node, else it uses UCBT ranking to chose one
@@ -689,7 +724,9 @@ class MctsTree:
             move = np.random.choice(list(moves))
             
             subtree[0] = MctsNode(move,idx) # creates the corresponding subtree root
+            
             return None,False
+        
         else:
             values = np.array([[self.tree[child_idx].wins[color], self.tree[child_idx].visits] for child_idx in self.tree[idx].children]) # make array of visits and wins for children
             ranking = np.divide(values.T[0,:], values.T[1,:]) + c * np.sqrt(np.divide(2 * np.log(np.sum(values[:,1],axis=0)),values.T[1,:])) # UCBT formula in numpy
@@ -699,13 +736,22 @@ class MctsTree:
                 options = np.argsort(ranking)[::-1]
                 options = options[:choices]
                 probs = ranking[options]/np.sum(ranking[options])
-                return np.random.choice(options,p=probs)
+                
+                return np.random.choice(options,p=probs), True
+            
             else:
                 return np.argmax(ranking), True
     
     def simulate_eval(self, game, eval_func, subtree : dict, epsilon=0.01):
         '''
-        ADD
+        Simulates a chess game until a terminal state is reached and stores all simulation move nodes in a subtree.
+        This method uses the either an evaluation function or random moves for simulation.
+        The subtree will contain the result of the simulation and the correct referencing in itself where the root node points to its parent in the parent tree. 
+        
+        :param game (ChessGame): The ChessGame instance to play the simulation on.
+        :param eval_func: Can be a EvaluationFunction class instance or None if simulation should be random.
+        :param subtree (dict): The subtree which is to be filled with nodes from the simulation.
+        :param epsilon (float): An epsilon value for random choice exploration during simulation.
         '''
         
         move_count = 1
@@ -736,8 +782,23 @@ class MctsTree:
                 subtree[move_count] = MctsNode(next_move,move_count-1)
                 subtree[move_count-1].children += [move_count]
                 move_count += 1
-                
+        
+        # get the result of the terminal state
         delta = game.get_result()
+        
+        # apply proven node rules based on result
+        last = max(list(subtree.keys()))
+        
+        if delta == (1,0):
+            subtree[last].prove(0) # make last node a proven win for white
+            subtree[last-1].prove(1) # make the parent of the last node a proven loss for black
+            
+        elif delta == (0,1):
+            subtree[last].prove(1) # make last node a proven win for black
+            subtree[last-1].prove(0) # make the parent of the last node a proven loss for white
+            
+        else:
+            subtree[last].prove(2) # make last node a proven draw
 
         # updates the subtree with the result already
         for key in subtree.keys():
@@ -745,10 +806,14 @@ class MctsTree:
     
     def simulate_model(self, game, model, subtree : dict, epsilon=0.005):
         '''
-        Simulates a chess game from a current state until termination using the ChessModel and returns the result.
-        :param game (engine.ChessGame):
-        :param simul_idx (int): The index of the node the simulation is run on as a subtree root node.
-        :param epsilon (float): An epsilon value for random choice exploration during simulation, default 0.005.
+        Simulates a chess game until a terminal state is reached and stores all simulation move nodes in a subtree.
+        This method uses the ChessModel class for simulation, each move is played according to the argmax the model policy output.
+        The subtree will contain the result of the simulation and the correct referencing in itself where the root node points to its parent in the parent tree. 
+        
+        :param game (ChessGame): The ChessGame instance to play the simulation on.
+        :param model (ChessModel): The ChessModel instance to generate moves from.
+        :param subtree (dict): The subtree which is to be filled with nodes from the simulation.
+        :param epsilon (float): An epsilon value for random choice exploration during simulation.
         '''
         
         move_count = 1
@@ -768,7 +833,22 @@ class MctsTree:
             subtree[move_count-1].children += [move_count]
             move_count += 1
         
+        # get the result of the terminal state
         delta = game.get_result()
+        
+        # apply proven node rules based on result
+        last = max(list(subtree.keys()))
+        
+        if delta == (1,0):
+            subtree[last].prove(0) # make last node a proven win for white
+            subtree[last-1].prove(1) # make the parent of the last node a proven loss for black
+            
+        elif delta == (0,1):
+            subtree[last].prove(1) # make last node a proven win for black
+            subtree[last-1].prove(0) # make the parent of the last node a proven loss for white
+            
+        else:
+            subtree[last].prove(2) # make last node a proven draw
         
         # updates the subtree with the result already
         for key in subtree.keys():
@@ -777,8 +857,11 @@ class MctsTree:
     def update(self, start_idx : int, delta : tuple, visits : int):
         '''
         Updates a node with a delta result and propagates the result to all its parents.
-        :param node (int): The index of the node to update.
+        This method is supposed to be called during the merge step on the parent node of each subtree.
+        
+        :param start_idx (int): The index of the node to update.
         :param delta (tuple): An update tuple to be applied to the node and its parents.
+        :param visits (int): The amount of visits to update with.
         '''
         
         index_chain = [start_idx]
