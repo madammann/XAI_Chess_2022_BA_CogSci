@@ -310,8 +310,38 @@ class MctsTree:
                     return True
             
             return False
-
-    def merge_subtrees(self, subtrees : list, update=True):
+        
+    def merge_branch(self, tree : dict, indices : list):
+        '''
+        Method for dictionary manipulation to merge specific nodes while keeping proper referencing.
+        Created as utility for self.merge_subtrees, this method fuses node pairs correctly.
+    
+        :param tree (dict): A dictionary to manipulate, has index-node pairs.
+        :param indices (list): A list of indices inside tree which are identical and should be merged
+        '''
+    
+        # get the parent idx
+        parental_idx = tree[indices[0]].parent
+    
+        # get a list of all children indices, assumes, as should be the case always, that there are no duplicates in the sum of all children
+        children_idx = []
+        for idx in indices:
+            children_idx += tree[idx].children
+    
+        # write merged node in first index position and set others to None (not pretty but functional to keep len(self) intact)
+        tree[indices[0]] = sum([tree[idx] for idx in indices])
+        for idx in indices[1:]:
+            tree[idx] = None
+    
+        # make parent point to correct child at idx indices[0]
+        new_children = [child for child in tree[parental_idx].children if child not in indices[1:]] # remove all references to indices[1:] nodes set to None, assume rest was fine
+        tree[child_idx].update_children(new_children,overwrite=True)
+    
+        # make all children point to the correct parent at idx indices[0]
+        for child_idx in children_idx:
+            tree[child_idx].update_parent(indices[0])
+        
+    def merge_subtrees(self, subtrees : list):
         '''
         Method for merging a list of subtrees into the parent tree (self.tree).
         
@@ -324,118 +354,155 @@ class MctsTree:
         
         During merging the following tree steps are taken:
         Step 1 - Update: Propagate subtree[0].wins and subtree[0].visits up from self.tree[subtree[0].parent]
-        Step 2 - Find and separate subtrees with identical root nodes since only one node is supposed to represent these inside the parent tree.
-        Step 3 - Merge: Merge all subtrees with non-identical roots and the first level of subtrees with identical root (then call recursively if necessary).
-        
-        *Subject to major change since current implementation is not working.
+        Step 2 - Removal: Remove all subtrees in subtrees which only contain one proven node already present in the tree.
+        Step 3 - Reference update: Updates all subtrees to have proper references for merging step.
+        Step 4 - Merge preparation: Writes all subtrees into one tree dictionary.
+        Step 5 - Identity merge: Intelligently checks all nodes which were added and finds and merges identical nodes with references.
+        Step 6 - Final merge: Writes the subtree into the parent tree.
         
         :param subtrees (list): A list of subtree dictionaries.
         '''
         
         # step 1 : propagate all deltas upwards to make next steps frictionless
-        if update:
-            for subtree in subtrees:
-                self.update(subtree[0].parent,subtree[0].wins,subtree[0].visits)
-
-        # step 2.1 : find all pairs of indices of subtrees which have an identical root node
-        identical_roots = []
-        if len(subtrees) >= 2:
-            for i, tree_a in enumerate(subtrees):
-                for j, tree_b in enumerate(subtrees):
-                    if i != j and not (j,i) in identical_roots:
-                        if tree_a[0] == tree_b[0]:
-                            identical_roots += [(i,j)]
+        for subtree in subtrees:
+            self.update(subtree[0].parent,subtree[0].wins,subtree[0].visits)
         
-        # test if any subtree roots are identical, if none are proceed to base case, else recursive call
-        if len(identical_roots) > 0:
-            # step 2.2 : create a final list of subtree index pairs which is non-repetitive
-            # code credited to TemporalWolf from StackOverflow
-            # https://stackoverflow.com/questions/42036188/merging-tuples-if-they-have-one-common-element
-            iset = set([frozenset(s) for s in identical_roots])  # Convert to a set of sets
-            identical_roots = []
-            while(iset):                  # while there are sets left to process:
-                nset = set(iset.pop())      # pop a new set
-                check = len(iset)           # does iset contain more sets
-                while check:                # until no more sets to check:
+        # step 2 : clean up subtrees since they may contain singular proven nodes which are already in the tree (see builder and select methods)
+        remove_indices = []
+        for i, subtree in enumerate(subtrees):
+            if subtree[0].proven:
+                # tests whether the subtree root is already in the tree by checking all children of the parent if one is identical
+                if subtree[0].move in [self.tree[child].move for child in self.tree[subtree[0].parent].children]:
+                    remove_indices += [i]
+        
+        for idx in remove_indices:
+            del subtrees[idx]
+        
+        # step 3 : find indices to write to self.tree and also update references of children and parents properly.
+        subtree_lengths = [len(subtree) for subtree in subtrees]
+        summed_subtree_lengths = [int(np.sum([subtree_lengths[0:i]])) for i in range(1,len(subtrees))]
+        delimiter_indices = [len(self)] + [len(self) + length for length in summed_subtree_lengths] # a list of all starting indices for each subtree in the merged tree
+        
+        # loop over all subtrees and initially only update parent and child references
+        for tree_idx, subtree in enumerate(subtrees):
+            for item_idx, node in subtrees[i].items():
+                # if the node is not the root node we overwrite parent and children with proper indices
+                if not item_idx == 0:
+                    node.update_parent(node.parent + delimiter_indices[tree_idx])
+                    new_children = [child + delimiter_indices[tree_idx] for child in node.children] # is empty if no children
+                    node.update_children(new_children, overwrite=True)
+                
+                # if the node was the root node we only overwrite children
+                else:
+                    new_children = [child + delimiter_indices[tree_idx] for child in node.children] # is empty if no children
+                    node.update_children(new_children, overwrite=True)
+        
+        # adjust all indices properly
+        for i, subtree in enumerate(subtrees):
+            subtrees[i] = dict(zip(range(delimiter_indices[i],delimiter_indices[i]+subtree_lengths[i]),subtree.values()))
+        
+        # step 4 : merge subtrees into a single subtree
+        tree = {}
+        for subtree in subtrees:
+            tree.update(subtree)
+            
+        # step 5 : find all nodes in subtree which are identical and merge them with correct referencing
+        # since all subtrees can only have identical nodes at the same depth we utilize this for a smarter comparison
+        
+        # store indices to look at smartly to look only at nodes at indices
+        layer_indices = delimiter_indices
+        
+        # store diverged branches, potential branches at current merge iteration and pairs to merge in here
+        potential_merges = [node for node in [tree[idx] for idx in layer_indices]]
+        diverged = set()
+        identical_pairs = []
+        
+        # step 5.1 : check all potential identical pairs and store them as tuples
+        for i, node_a in enumerate(potential_merges):
+            for j, node_b in enumerate(potential_merges):
+                # compare smartly to not check same pair in reverse and also not identical indices
+                if i != j and not j < i:
+                    if node_a == node_b:
+                        identical_pairs += [(i, j)]
+        
+        # step 5.2 : fuse all tuples with at least one element identical to merge identical nodes present more than twice properly
+        # code credited to TemporalWolf from StackOverflow
+        # https://stackoverflow.com/questions/42036188/merging-tuples-if-they-have-one-common-element
+        iset = set([frozenset(s) for s in identical_pairs])  # Convert to a set of sets
+        identical_pairs = []
+        
+        while(iset):                  # while there are sets left to process:
+            nset = set(iset.pop())      # pop a new set
+            check = len(iset)           # does iset contain more sets
+            
+            while check:                # until no more sets to check:
+                check = False
+                
+                for s in iset.copy():       # for each other set:
+                    if nset.intersection(s):  # if they intersect:
+                        check = True            # must recheck previous sets
+                        iset.remove(s)          # remove it from remaining sets
+                        nset.update(s)          # add it to the current set
+                        
+            identical_pairs.append(tuple(nset))  # convert back to a list of tuples
+        
+        # step 5.3 : store divergent branch delimiter indices to skip in next iteration
+        for idx in range(len(subtrees)):
+            # if the index is not already confirmed divergent we test if it is in identical pairs
+            if not len(list(filter(lambda i_pairs: idx in i_pairs, identical_pairs))) > 0 or idx in diverged:
+                diverged.add(idx)
+                
+        # step 5.4 : loop with incremented layer until all are divergent branches or no more branches are left
+        # until there was no identical pair found anymore merge identical pairs
+        while len(diverged) < len(subtrees):
+            # we merge all pairs immediately with the proper function
+            for pair in identical_pairs:
+                self.merge_branch(tree, [layer_indices[val] for val in pair])
+            
+            # we need to recalculate delimiters for the next comparison step
+            layer_indices = [idx+1 for idx in layer_indices]
+            
+            # additionally we filter out as divergent all positions where layer_indices[i] - delimiter_indices[i] > subtree_lengths[i] since the subtree i would then have no nodes left
+            for i in range(len(layer_indices)):
+                if layer_indices[i] - delimiter_indices[i] > subtree_lengths[i]:
+                    diverged.add(i)
+            
+            # get all nodes from the current layer of non-diverged branches to check
+            potential_merges = [tree[layer_indices[idx]] for idx in range(len(subtrees)) if idx not in diverged]
+            
+            # repeat steps 5.1 to 5.3
+            identical_pairs = []
+            
+            for i, node_a in enumerate(potential_merges):
+                for j, node_b in enumerate(potential_merges):
+                    if i != j and not j < i:
+                        if node_a == node_b:
+                            identical_pairs += [(i, j)]
+            
+            iset = set([frozenset(s) for s in identical_pairs])
+            identical_pairs = []
+        
+            while(iset):
+                nset = set(iset.pop())
+                check = len(iset)
+            
+                while check:
                     check = False
-                    for s in iset.copy():       # for each other set:
-                        if nset.intersection(s):  # if they intersect:
-                            check = True            # must recheck previous sets
-                            iset.remove(s)          # remove it from remaining sets
-                            nset.update(s)          # add it to the current set
-                identical_roots.append(tuple(nset))  # convert back to a list of tuples
-            
-            # step 3.1 : split subtrees into identical and non-identical parts
-            identical = [val for tup in identical_roots for val in tup]
-            non_identical = list(set([i for i in range(len(subtrees))]).difference(identical))
-            
-            identical = [subtrees[i] for i in range(len(subtrees)) if i in identical]
-            non_identical = [subtrees[i] for i in range(len(subtrees)) if i in non_identical]
-            
-            # step 3.2 : merge non-identical subtrees onto tree if present
-            keyrange_sum = np.sum([len(subtree) for subtree in non_identical])
-            if keyrange_sum > 0:
-                keys = np.add(range(keyrange_sum),len(self))
-                pos = 0
-            
-                for subtree in non_identical:
-                    for k,node in subtree.items():
-                        self.tree[subtree[k].parent].update_children(children=[keys[pos]])
-                        self.tree[keys[pos]] = node # write node to tree
-                        self.tree[keys[pos]].update_children([],overwrite=True)
-                        if k+1 < len(subtree):
-                            subtree[k+1].update_parent(parent=keys[pos]) # upodate original subtree child parent index
-                        pos += 1
-            
-            # step 3.3 : merge identical subtree roots and adjust the remaindure properly
-            keys = np.add(range(len(identical_roots)),len(self)) # create the keys for writing to self.tree
-            
-            subtree_roots = {i : None for i in range(len(identical_roots))}
-            for i, pair in enumerate(identical_roots):
-                subtree_roots[i] = subtrees[pair[0]][0]
-                for j in pair[1:]:
-                    subtree_roots[i] = subtree_roots[i] + subtrees[j][0]
-            
-            for i,node in subtree_roots.items():
-                node.update_children([],overwrite=True) # delete children list since it points to the wrong tree now
-                self.tree[keys[i]] = node # write node to tree
-                self.tree[node.parent].update_children([keys[i]]) # add children ref to parent of node
                 
-                # update the origin subtrees to point to self.tree parent
-                for origin in identical_roots[i]:
-                    if len(subtrees[origin]) > 1:
-                        subtrees[origin][1].update_parent(keys[i]) # link parent ref to to-be roots
-                
-                for i in range(len(identical)):
-                    # only if the subtree in question has more than one node (since the first node needs to be deleted)
-                    if len(identical[i]) > 1:
-                        identical[i] = dict(zip(list(range(len(identical[i])-1)),list(identical[i].values())[1:]))
-                        for j, node in enumerate(identical[i].values()):
-                            if j != 0:
-                                node.update_parent(j-1) # ADD
-                            if j < len(identical[i])-1:
-                                node.update_children([j+1],overwrite=True) # ADD
-                    else:
-                        identical[i] = {}
-                
-                if {} in identical:
-                    identical.remove({}) # remove empty dicts if there are any
+                    for s in iset.copy():
+                        if nset.intersection(s):
+                            check = True
+                            iset.remove(s)
+                            nset.update(s)
+                        
+                identical_pairs.append(tuple(nset))
             
-            # step 4 : recursive call with only the previously identical subtrees
-            self.merge_subtrees(identical,update=False)
+            for idx in range(len(subtrees)):
+                if not len(list(filter(lambda i_pairs: idx in i_pairs, identical_pairs))) > 0 or idx in diverged:
+                    diverged.add(idx)
             
-        else:
-            keys = np.add(range(np.sum([len(subtree) for subtree in subtrees])),len(self))
-            pos = 0
-            
-            for subtree in subtrees:
-                for k,node in subtree.items():
-                    self.tree[subtree[k].parent].update_children(children=[keys[pos]])
-                    self.tree[keys[pos]] = node # write node to tree
-                    self.tree[keys[pos]].update_children([],overwrite=True)
-                    if k+1 < len(subtree):
-                        subtree[k+1].update_parent(parent=keys[pos]) # upodate original subtree child parent index
-                    pos += 1
+        # step 6 : merge the tree into self.tree properly
+        self.tree.update(tree)
     
     def prune(self, game_pointers : list):
         '''
