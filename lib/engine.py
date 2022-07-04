@@ -152,7 +152,6 @@ class ChessGame:
         # if the output tensor's shape would be smaller than intended it is filled with zero-valued layers
         if tensor.shape[2] < self.T * 13 + 7:
             tensor = np.dstack([tensor,np.dstack([np.full((8,8,1),0)]*(self.T * 13 + 7 - tensor.shape[2]))])
-            print(tensor.shape)
             
         return tf.expand_dims(tf.constant(tensor,dtype='float32'),axis=0)
     

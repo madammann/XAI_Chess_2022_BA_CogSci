@@ -326,16 +326,23 @@ class MctsTree:
         # get a list of all children indices, assumes, as should be the case always, that there are no duplicates in the sum of all children
         children_idx = []
         for idx in indices:
-            children_idx += tree[idx].children
+            children_idx += tree[idx].children 
     
         # write merged node in first index position and set others to None (not pretty but functional to keep len(self) intact)
-        tree[indices[0]] = sum([tree[idx] for idx in indices])
+        summands = [tree[idx] for idx in indices]
+        tree[indices[0]] = sum(summands[1:],summands[0])
         for idx in indices[1:]:
             tree[idx] = None
     
         # make parent point to correct child at idx indices[0]
-        new_children = [child for child in tree[parental_idx].children if child not in indices[1:]] # remove all references to indices[1:] nodes set to None, assume rest was fine
-        tree[child_idx].update_children(new_children,overwrite=True)
+        # if currently in the first layer of subtrees we may reference a parent in the parent tree which needs to be handled here
+        if parental_idx in tree.keys():
+            new_children = [child for child in tree[parental_idx].children if child not in indices[1:]] # remove all references to indices[1:] nodes set to None, assume rest was fine
+            tree[parental_idx].update_children(new_children,overwrite=True)
+            
+        else:
+            new_children = [child for child in self.tree[parental_idx].children if child not in indices[1:]] # remove all references to indices[1:] nodes set to None, assume rest was fine
+            self.tree[parental_idx].update_children(new_children,overwrite=True)
     
         # make all children point to the correct parent at idx indices[0]
         for child_idx in children_idx:
@@ -457,6 +464,7 @@ class MctsTree:
         while len(diverged) < len(subtrees):
             # we merge all pairs immediately with the proper function
             for pair in identical_pairs:
+                print('to be merged:', [tree[layer_indices[idx]].children for idx in pair])
                 self.merge_branch(tree, [layer_indices[val] for val in pair])
             
             # we need to recalculate delimiters for the next comparison step
@@ -503,18 +511,6 @@ class MctsTree:
             
         # step 6 : merge the tree into self.tree properly
         self.tree.update(tree)
-    
-    def prune(self, game_pointers : list):
-        '''
-        Method for removing branches in self.tree based on which branches will never be visited again.
-        Since select starts from the index in game_pointers all nodes which are irrelevant may be pruned.
-        If a pointer points to a node in depth level 4, then all children of it's siblings will be removed.
-        The siblings of the node pointed to will be kept for training purposes.
-        
-        :param game_pointers (list): A list of integers representing the index in self.tree a game is at.
-        '''
-        
-        pass
     
     def bestmove(self, idx : int) -> str:
         '''
@@ -628,7 +624,6 @@ class MctsTree:
                 
                 # make the best move for each game according to tree and prune branches which will never be visited again
                 game_pointer = [self.bestmove(ptr) for ptr in game_pointer]
-                self.prune()
                     
                 iteration += 1 # in this context an iteration is one move in each non-terminal game
             

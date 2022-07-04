@@ -1,4 +1,5 @@
 import numpy as np
+
 from stockfish import Stockfish
 from engine import ChessGame
 
@@ -50,3 +51,35 @@ class StockfishModel:
 #             return 0
         
 #         return winrate - loserate
+
+
+def model_vs_stockfish(model, setup=None, move_chain=[]):
+    '''
+    ADD
+    '''
+    
+    game = ChessGame(initial_moves=move_chain)
+    stockfish = StockfishModel()
+    
+    move_list = move_chain
+    
+    stockfish_white = True
+    
+    if np.random.random() > 0.5:
+        stockfish_white = False
+        
+    while not game.terminal:
+        turn = game.board.turn
+        
+        if turn == stockfish_white:
+            move_list += [stockfish.play_next(game)]
+            
+        else:
+            input_tensor = game.get_input_tensor()
+            policy, value = model(input_tensor)
+            move = policy_argmax_choice(policy.numpy(), game.possible_moves, flipped=not game.board.turn)
+            move_list += [move]
+        
+        result = game.get_result()
+        
+        return move_list, result

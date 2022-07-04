@@ -96,3 +96,10 @@ class ChessModel(tf.keras.Model):
         val = self.value_head(x,training=training)
         policy = self.policy_head(x,training=training)
         return val, policy
+    
+    def save(self,path):
+        self.save_weights(path)
+    
+    def load(self, path):
+        self.built = True
+        self.load_weights(path)

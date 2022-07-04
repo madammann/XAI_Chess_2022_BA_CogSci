@@ -1,0 +1,17 @@
+name: XaiChess2022
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.8.8
+  - pip
+  - pip:
+    - numpy
+    - pandas
+    - chess=1.5
+    - matplotlib
+    - tensorflow=2.5
+    - tensorflow-datasets=4.3
+    - h5py=3.1
+    - tqdm
+    - stockfish
