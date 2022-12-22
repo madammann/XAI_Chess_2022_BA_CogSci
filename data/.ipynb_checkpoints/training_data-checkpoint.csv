@@ -1,0 +1,2 @@
+Epoch,Milestone,Device,Startdatetime,Enddatetime,Startepsilon,Loss,Path
+1,3,ADD MANUALLY,2022-10-05 13:23:29.354321,2022-10-05 13:23:29.354321,0.003,8.283,./path/somehwere/file.h5
