@@ -15,3 +15,4 @@ dependencies:
     - h5py=3.1
     - tqdm
     - stockfish
+    - pgn_parser

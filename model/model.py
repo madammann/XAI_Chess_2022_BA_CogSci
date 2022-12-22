@@ -1,9 +1,11 @@
 import tensorflow as tf
 
+from model.mcts import MctsNode
+
 class ResidualLayer(tf.keras.Model):
     def __init__(self):
         super(ResidualLayer, self).__init__()
-        self.conv = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same')
+        self.conv = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same',kernel_regularizer='l2')
         self.batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         
@@ -19,7 +21,7 @@ class ResidualLayer(tf.keras.Model):
 class ConvolutionalStem(tf.keras.Model):
     def __init__(self,residual_size=6):
         super(ConvolutionalStem, self).__init__()
-        self.initial_cnn_layer = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same',input_shape=(None,8,8,None))
+        self.initial_cnn_layer = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same',kernel_regularizer='l2',input_shape=(None,8,8,None))
         self.initial_batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         self.residual_layers = [ResidualLayer() for _ in range(residual_size-1)]
@@ -36,7 +38,7 @@ class ConvolutionalStem(tf.keras.Model):
 class ValueHead(tf.keras.Model):
     def __init__(self):
         super(ValueHead, self).__init__()
-        self.single_filter_conv = tf.keras.layers.Conv2D(filters=1,kernel_size=1,strides=1,padding='same')
+        self.single_filter_conv = tf.keras.layers.Conv2D(filters=1,kernel_size=1,strides=1,padding='same',kernel_regularizer='l2')
         self.batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         self.flatten = tf.keras.layers.Flatten()
@@ -56,10 +58,10 @@ class ValueHead(tf.keras.Model):
 class PolicyHead(tf.keras.Model):
     def __init__(self):
         super(PolicyHead, self).__init__()
-        self.two_filter_conv = tf.keras.layers.Conv2D(filters=2,kernel_size=1,strides=1,padding='same')
+        self.two_filter_conv = tf.keras.layers.Conv2D(filters=2,kernel_size=1,strides=1,padding='same',kernel_regularizer='l2')
         self.batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
-        self.policy_layer = tf.keras.layers.Conv2D(filters=73,kernel_size=1,strides=1,padding='same')
+        self.policy_layer = tf.keras.layers.Conv2D(filters=73,kernel_size=1,strides=1,padding='same',kernel_regularizer='l2')
         self.flatten = tf.keras.layers.Flatten()
         self.softmax = tf.keras.activations.softmax
     
@@ -103,3 +105,20 @@ class ChessModel(tf.keras.Model):
     def load(self, path):
         self.built = True
         self.load_weights(path)
+        
+class LossConverter(tf.keras.losses.Loss):
+    '''
+    ADD
+    '''
+    
+    def __call__(self, pred_values : tf.Tensor, true_values : tf.Tensor, policy : tf.Tensor, nodes : list) -> tf.Tensor:
+        '''
+        ADD
+        '''
+        
+        z = tf.constant([[node.value for node in nodes]],dtype=tf.float32)
+        print(z)
+        pi = tf.constant([[child.value for child in node.children] for node in nodes],dtype=tf.float32)
+        print(pi)
+        
+        return tf.reduce_mean(tf.math.square(pred_values, z)-pi,axis=-1)

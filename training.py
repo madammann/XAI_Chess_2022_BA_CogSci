@@ -1,3 +1,4 @@
+# IMPORTS
 import chess
 import os
 
@@ -9,13 +10,11 @@ import tensorflow as tf
 from tqdm import tqdm
 from datetime import datetime
 
-from model.mcts import *
-from lib.engine import *
-from model.model import *
+from model.mcts import MctsTree
+from lib.engine import ChessGame
+from model.model import ChessModel
 
-#======================
-# function declaration
-#======================
+# TRAINING UTILITY FUNCTIONS
 def load_progress() -> tuple:
     '''
     Reads the file progress.txt in the weights folder to obtain milestone data.
@@ -39,7 +38,7 @@ def save_progress(progress : tuple):
     with open('./weights/progress.txt','w') as f:
         f.write(f'epoch={progress[0]}\nmilestone={progress[1]}')
 
-def verify_continue(starttime, timer, progress, goal):
+def verify_continue(starttime, timer, progress, goal) -> bool:
     '''
     This function is called after each milestone to verify whethet the training shall be continued.
     
@@ -74,9 +73,19 @@ def append_training_stats(data : list):
     
     pass
 
-#======================
-# initialisation
-#======================
+# TRAINING FUNCTIONS
+def train(model, data):
+    for input_tensor, error in data:
+        pass
+    
+# z : the (discounted?) result of the game -1,0,1
+# v : predicted outcome e.g. val of network
+# pi : distribution of search probabilities(?)
+# p : policy output e.g. pol of network
+# c : parameter for controling l2 weight norm
+# s : input tensor
+
+# INITIALISATION
 
 # training setup
 pc_care = True # if set to true then the PC will be shut down 5mins after training milestone for the day was reached.
@@ -124,9 +133,7 @@ try:
 except:
     pass # initialize and save initial model here since it was not yet created
 
-#======================
-# training
-#======================
+# TRAINING LOOP
 
 # do training until set goal is completed or the pc needs some rest
 while verify_continue(now, shutdown_timer, progress, progress_target):
@@ -136,7 +143,7 @@ while verify_continue(now, shutdown_timer, progress, progress_target):
         pass # do episode and training here properly
     
     # After a training milestone is hit we update the porgress tuple
-    if progress+625 == episodes_per_epoch:
+    if progress + 625 == episodes_per_epoch:
         progress = (progress[0]+1, 0) # we increment the epoch and set episodes to 0 since we have reached a new epoch
     else:
         progress = (progress[0],progress[1]+625) # we increment the episode counter of progress since we are not in the next epoch yet
