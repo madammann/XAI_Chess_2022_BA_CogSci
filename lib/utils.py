@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 class IllegalMoveError(Exception):
     '''
@@ -425,3 +426,21 @@ def move2int(move : str) -> int:
         move = move[:4]+{'q' : '1', 'r' : '2', 'n' : '3', 'b' : '4'}[move[-1]]
     
     return int(move)
+
+def get_padded_move_probabilities(legal_moves : list, move_probs : list, flipped=False):
+    '''
+    ADD
+    '''
+    
+    move_probs_tensor = np.zeros((8,8,73))
+    
+    #add
+    if flipped:
+        for move, prob in zip(legal_moves, move_probs):
+            move_probs_tensor[get_policy_index(flip_uci_move(move))] = prob
+    else:
+        for move, prob in zip(legal_moves, move_probs):
+            move_probs_tensor[get_policy_index(move)] = prob
+    
+    #shape and type casting and returning
+    return tf.constant(move_probs_tensor,dtype='float32')

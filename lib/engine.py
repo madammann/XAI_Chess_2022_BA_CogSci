@@ -30,7 +30,7 @@ class ChessGame:
         self.board = chess.Board()
         self.T = T
         self.terminal = False
-        self.result = None
+        self.result = (0,0)
         self.opponent_rep = 0
         
         if initial_moves == []:
@@ -150,7 +150,6 @@ class ChessGame:
             for piece in [chess.PAWN,chess.ROOK,chess.KNIGHT,chess.BISHOP,chess.QUEEN,chess.KING]:
                 tensor += [np.array(self.board.pieces(piece,color).tolist()).reshape(8,8,1)]
         
-        '''TODO: Implement the repetition for opposite color board or leave it like this'''
         '''Get the current board repetition count in the most convenient way'''
         rep = 1
         while not self.board.is_repetition(rep):
@@ -205,12 +204,11 @@ class ChessGame:
         tensor = np.dstack(tensor)
         
         '''Flip the board tensor horizontally if black is to move'''
-        if self.board.turn == chess.BLACK:
+        if self.board.turn == False:
             tensor = np.flip(tensor,axis=0) # We can flip the entire tensor since the rule dimensions are uniform (np.full)
         
-        
         # if the output tensor's shape would be smaller than intended it is filled with zero-valued layers
-        if tensor.shape[2] < self.T * 13 + 7:
-            tensor = np.dstack([tensor,np.dstack([np.full((8,8,1),0)]*(self.T * 13 + 7 - tensor.shape[2]))])
+        if tensor.shape[2] < ((self.T * 14) + 7):
+            tensor = np.dstack([tensor,np.dstack([np.full((8,8,1),0)]*(self.T * 14 + 7 - tensor.shape[2]))])
         
         return tf.expand_dims(tf.constant(tensor,dtype='float32'),axis=0)

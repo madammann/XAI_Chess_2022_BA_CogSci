@@ -105,7 +105,7 @@ class MctsNode:
     @property
     def parent(self):
         '''
-        The parent node as MctsNode object or None of self is the root node.
+        The parent node as MctsNode object or None if self is the root node.
         '''
         
         if not self.idx == 0:
@@ -377,6 +377,7 @@ class MctsTree:
         
         #hyperparameter initialization
         self.game_limit = 500
+        self.simul_limit = None
         self.A = 1
         self.c = 2
         
@@ -519,7 +520,7 @@ class MctsTree:
         #else we just return the unadjusted policy
         return policy
         
-    def __call__(self, simulation_func, game_limit=500) -> np.ndarray:
+    def __call__(self, simulation_func, game_limit=800, simulation_limit=None) -> np.ndarray:
         '''
         Call method for this class, used for building the MCTS tree.
         Will start building the tree in parallel in the shared memory buffer using multithreading.
@@ -532,6 +533,7 @@ class MctsTree:
         '''
         
         self.game_limit = MctsNode(self.buf,0).games + game_limit #set allowed game limit to current games plus the parameter set
+        self.simul_limit = simulation_limit
         
         pool = ThreadPool(self.THREADS)
         args = [(simulation_func, self.LIMITS[i][0], self.LIMITS[i][1]) for i in range(self.THREADS)]
@@ -620,7 +622,7 @@ class MctsTree:
         '''
         
         #proven cases I and II
-        if node.proven:
+        if node.proven and node.idx > 0:
             #we test all siblings whether they are proven nodes
             if all([sibling.proven for sibling in node.parent.children]):
                 parent = node.parent
@@ -732,9 +734,17 @@ class MctsTree:
             return value
         
         #we simulate until we reach a terminal state with our simulation policy
-        while not game.terminal:
-            move = simulation_func(game)
-            game.select_move(move)
+        if self.simul_limit == None:
+            while not game.terminal:
+                move = simulation_func(game)
+                game.select_move(move)
+                
+        else:
+            move_count = 0
+            while not game.terminal and move_count <= self.simul_limit:
+                move = simulation_func(game)
+                game.select_move(move)
+                move_count += 1
         
         return game.result[self.root_state.board.turn]
     

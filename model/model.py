@@ -1,11 +1,9 @@
 import tensorflow as tf
 
-from model.mcts import MctsNode
-
 class ResidualLayer(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, filters=32):
         super(ResidualLayer, self).__init__()
-        self.conv = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same',kernel_regularizer='l2')
+        self.conv = tf.keras.layers.Conv2D(filters=filters,kernel_size=3,strides=1,padding='same',kernel_regularizer='l2')
         self.batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         
@@ -16,12 +14,13 @@ class ResidualLayer(tf.keras.Model):
         x = self.batch_norm(x,training=training)
         x = tf.add(x,x_skip)
         x = self.ReLU(x)
+        
         return x
     
 class ConvolutionalStem(tf.keras.Model):
-    def __init__(self,residual_size=6):
+    def __init__(self,residual_size=6,filters=32):
         super(ConvolutionalStem, self).__init__()
-        self.initial_cnn_layer = tf.keras.layers.Conv2D(filters=64,kernel_size=3,strides=1,padding='same',kernel_regularizer='l2',input_shape=(None,8,8,None))
+        self.initial_cnn_layer = tf.keras.layers.Conv2D(filters=filters,kernel_size=3,strides=1,padding='same',kernel_regularizer='l2',input_shape=(None,8,8,None))
         self.initial_batch_norm = tf.keras.layers.BatchNormalization()
         self.ReLU = tf.keras.layers.ReLU()
         self.residual_layers = [ResidualLayer() for _ in range(residual_size-1)]
@@ -31,8 +30,10 @@ class ConvolutionalStem(tf.keras.Model):
         x = self.initial_cnn_layer(x)
         x = self.initial_batch_norm(x,training=training)
         x = self.ReLU(x)
+        
         for i in range(len(self.residual_layers)):
             x = self.residual_layers[i](x)
+            
         return x
 
 class ValueHead(tf.keras.Model):
@@ -72,31 +73,39 @@ class PolicyHead(tf.keras.Model):
         x = self.ReLU(x)
         x = self.policy_layer(x)
         batch_size = x.shape[0]
+        
         if batch_size > 1:
             x = tf.split(x,batch_size)
+            
             for b in range(batch_size):
                 x[b] = self.flatten(x[b])
                 x[b] = self.softmax(x[b])
-                x[b] = tf.reshape(x[b],shape=(1,8,8,73))
+                x[b] = tf.reshape(x[b],shape=(8,8,73))
             x = tf.concat([x],axis=0)
+            
         else:
             x = self.flatten(x)
             x = self.softmax(x)
             x = tf.reshape(x,shape=(1,8,8,73))
+            
         return x
 
 class ChessModel(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, filters=32,residual_size=6, T=8):
         super(ChessModel, self).__init__()
-        self.convolutional_stem = ConvolutionalStem()
+        self.convolutional_stem = ConvolutionalStem(filters=filters,residual_size=residual_size)
         self.value_head = ValueHead()
         self.policy_head = PolicyHead()
+        
+        self.optimizer = tf.keras.optimizers.Adam()
+        self.loss = lambda v, z, p, pi: tf.losses.mean_squared_error(v, z) - tf.losses.CategoricalCrossentropy(reduction=tf.keras.losses.Reduction.SUM)(p,pi)
         
     @tf.function
     def call(self, x, training=False):
         x = self.convolutional_stem(x,training=training)
         val = self.value_head(x,training=training)
         policy = self.policy_head(x,training=training)
+        
         return val, policy
     
     def save(self,path):
@@ -105,20 +114,3 @@ class ChessModel(tf.keras.Model):
     def load(self, path):
         self.built = True
         self.load_weights(path)
-        
-class LossConverter(tf.keras.losses.Loss):
-    '''
-    ADD
-    '''
-    
-    def __call__(self, pred_values : tf.Tensor, true_values : tf.Tensor, policy : tf.Tensor, nodes : list) -> tf.Tensor:
-        '''
-        ADD
-        '''
-        
-        z = tf.constant([[node.value for node in nodes]],dtype=tf.float32)
-        print(z)
-        pi = tf.constant([[child.value for child in node.children] for node in nodes],dtype=tf.float32)
-        print(pi)
-        
-        return tf.reduce_mean(tf.math.square(pred_values, z)-pi,axis=-1)
