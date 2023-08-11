@@ -238,6 +238,19 @@ def idx2position(idx : int) -> tuple:
     
     return (x,y,depth)
 
+def position2idx(position : tuple) -> int:
+    '''
+    Converts tuple of coordinates to index of flattened policy array.
+
+    :param position (tuple): A tuple (x,y,d) for the positional and feature dimensions the index corresponds to in the stacked-up policy embedding.
+
+    :returns (int): An index in the flattened policy embedding.
+    '''
+
+    idx = position[0] * 64 + position[1] * 8 + position[2]
+    
+    return idx
+
 def get_policy_index(move : str) -> tuple:
     '''
     Converts an uci move to a coordinate tuple from the policy embedding.
@@ -383,16 +396,46 @@ def policy_argmax_choice(policy_tensor : np.ndarray, legal_moves : list, flipped
     searchspace = []
     if flipped:
         for move in legal_moves:
-            searchspace += [policy_tensor[get_policy_index(flip_uci_move(move))]] #adds to the searchspace the probability of each move in the legal move list flipped horizontally
+            #adds to the searchspace the probability of each move in the legal move list flipped horizontally
+            searchspace += [policy_tensor[get_policy_index(flip_uci_move(move))]]
             
     else:
         for move in legal_moves:
-            searchspace += [policy_tensor[get_policy_index(move)]] #adds to the searchspace the probability of each move in the legal move list
+            #adds to the searchspace the probability of each move in the legal move list
+            searchspace += [policy_tensor[get_policy_index(move)]]
             
-    #find the index for the legal moves with the highest probability in the policy tensor.
+    #find the index for the legal moves with the highest probability in the policy tensor
     argmax = np.argmax(searchspace)
     
     return legal_moves[argmax]
+
+def policy_probabilities(policy_tensor : np.ndarray, legal_moves : list, flipped=False) -> str:
+    '''
+    Finds the legal move with highest likelyhood in the numpy array from the policy tensor.
+    Since efficiency is key, and a tie is highly unlikely in a well trained network, ties are not considered.
+    In case two moves have an equal probability the one with the lower index in the legal moves will be chosen by np.argmax.
+    
+    :param policy_tensor (np.ndarray): The numpy array of the policy tensor, unflattened with shape (8,8,64).
+    :param legal_moves (list): A list of all the uci-encoded legal moves taken from the current position for masking the policy space.
+    :param flipped (bool): A boolean whether legal moves have to be flipped before checking in the tensor; meaning the model output is for black.
+    
+    :returns (str): Returns the uci-encoded move which corresponds to the highest likelihood in the policy embedding.
+    '''
+    
+    #restricts search only to legal moves.
+    searchspace = []
+    if flipped:
+        for move in legal_moves:
+            #adds to the searchspace the probability of each move in the legal move list flipped horizontally
+            searchspace += [policy_tensor[get_policy_index(flip_uci_move(move))]]
+            
+    else:
+        for move in legal_moves:
+            #adds to the searchspace the probability of each move in the legal move list
+            searchspace += [policy_tensor[get_policy_index(move)]]
+    
+    #we return the searchspace without using any argmax on it
+    return searchspace
 
 def int2move(move : int) -> str:
     '''
@@ -432,7 +475,7 @@ def get_padded_move_probabilities(legal_moves : list, move_probs : list, flipped
     ADD
     '''
     
-    move_probs_tensor = np.zeros((8,8,73))
+    move_probs_tensor = np.full((8,8,73),1e-10)
     
     #add
     if flipped:
@@ -444,3 +487,25 @@ def get_padded_move_probabilities(legal_moves : list, move_probs : list, flipped
     
     #shape and type casting and returning
     return tf.constant(move_probs_tensor,dtype='float32')
+
+def policy_argsort(policy_tensor : np.ndarray, legal_moves : list, flipped=False) -> list:
+    '''
+    ADD
+    '''
+    
+    #restricts search only to legal moves.
+    searchspace = []
+    if flipped:
+        for move in legal_moves:
+            #adds to the searchspace the probability of each move in the legal move list flipped horizontally
+            searchspace += [policy_tensor[get_policy_index(flip_uci_move(move))]]
+            
+    else:
+        for move in legal_moves:
+            #adds to the searchspace the probability of each move in the legal move list
+            searchspace += [policy_tensor[get_policy_index(move)]]
+            
+    #find the index for the legal moves with the highest probability in the policy tensor.
+    indices = np.argsort(searchspace)[::-1]
+    
+    return [legal_moves[idx] for idx in indices]

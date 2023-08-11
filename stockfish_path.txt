@@ -1,1 +1,0 @@
-./stockfish/stockfish_15_x64_avx2.exe

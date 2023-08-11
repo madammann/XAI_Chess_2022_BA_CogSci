@@ -1,100 +1,147 @@
 import chess
-import numpy
-from multiprocessing.pool import ThreadPool
 
-class EvaluationFunction:
-    def __init__(self, weights : list, piece_weights=[0.4,1,1,2,3.5]):
-        '''
-        ADD
-        '''
-        
-        self.weights = weights
-        self.piece_weights = piece_weights
+import numpy as np
+
+from copy import deepcopy
+
+def piece_value(piece):
+    '''
+    ADD
+    '''
     
-    def __call__(self, game):
-        '''
-        ADD
-        '''
-        
-        parent_board = game.board.epd()
-        color = not game.board.turn
-        
-        args = [(parent_board, move) for move in game.possible_moves]
-        children_boards = ThreadPool(len(game.possible_moves)).map(self.create_epd, args)
-        
-        args = [(children_board, color) for children_board in children_boards]
-        scores = ThreadPool(len(game.possible_moves)).map(self.evaluate_position, args)
-        
-        return game.possible_moves[np.argmax(scores)]
+    if piece.piece_type == chess.PAWN:
+        return 1
     
-    def create_epd(parent_epd : str, move : str) -> str:
-        '''
-        ADD
-        '''
-        
-        board = chess.Board.from_epd(parent_epd)[0]
-        board.push(chess.Move.from_uci(move))
-        
-        return board.epd()
+    elif piece.piece_type == chess.KNIGHT:
+        return 3
     
-    def evaluate_position(pos : str, color : bool) -> float:
-        '''
-        ADD
-        '''
-        
-        score = piece_score(pos, color) * self.weights[0]
-        score += control_score(pos, color) * self.weights[1]
-        score += volatility_score(pos, color) * self.weights[2]
-        score += offense_score(pos, color) * self.weights[3]
-        score += defense_score(pos, color) * self.weights[4]
-        
-        return score
+    elif piece.piece_type == chess.BISHOP:
+        return 3
     
-    def piece_score(pos : str, color : bool) -> float:
-        '''
-        ADD
-        '''
-        
-        board = chess.Board.from_epd(pos)[0]
-        
-        score = len(board.pieces(chess.PAWN, color)) * self.piece_weights[0]
-        score += len(board.pieces(chess.KNIGHT, color)) * self.piece_weights[1]
-        score += len(board.pieces(chess.BISHOP, color)) * self.piece_weights[2]
-        score += len(board.pieces(chess.ROOK, color)) * self.piece_weights[3]
-        score += len(board.pieces(chess.QUEEN, color)) * self.piece_weights[4]
-        
-        score -= len(board.pieces(chess.PAWN, not color)) * self.piece_weights[0]
-        score -= len(board.pieces(chess.KNIGHT, not color)) * self.piece_weights[1]
-        score -= len(board.pieces(chess.BISHOP, not color)) * self.piece_weights[2]
-        score -= len(board.pieces(chess.ROOK, not color)) * self.piece_weights[3]
-        score -= len(board.pieces(chess.QUEEN, not color)) * self.piece_weights[4]
-        
-        return score
+    elif piece.piece_type == chess.ROOK:
+        return 5
     
-    def control_score(pos : str, color : bool) -> float:
-        '''
-        ADD
-        '''
-        
-        pass
+    elif piece.piece_type == chess.QUEEN:
+        return 9
     
-    def volatility_score(pos : str, color : bool) -> float:
-        '''
-        ADD
-        '''
-        
-        pass
+    elif piece.piece_type == chess.KING:
+        return 100
+
+def trade_score(target : int, board : chess.Board) -> int:
+    '''
+    ADD
+    '''
     
-    def offense_score(pos : str, color : bool) -> float:
-        '''
-        ADD
-        '''
-        
-        pass
+    attacked_fields = [i for i, val in enumerate(board.attackers(chess.WHITE, target).tolist()) if val == True]+[i for i, val in enumerate(board.attackers(chess.BLACK, target).tolist()) if val == True]
+    involved_pieces = [board.piece_map()[field] for field in list(set(attacked_fields).intersection(board.piece_map().keys()))] #only get fields with pieces on them
     
-    def defense_score(pos : str, color : bool) -> float:
-        '''
-        ADD
-        '''
+    ally = [piece for piece in involved_pieces if piece.color == board.turn]
+    opponent = [piece for piece in involved_pieces if piece.color != board.turn]
+    
+    a = []
+    for piece in ally:
+        a += [piece_value(piece)]
+    
+    b = []
+    for piece in opponent:
+        b += [piece_value(piece)]
+    
+    current_occupant = piece_value(board.piece_map()[target])
+    
+    #we sort all values involved besides the piece taken initially according to value
+    a = sorted(a)
+    b = sorted(b)
+    
+    #we insert the current occupant in the opponent value list here (after sorting!) since it was taken first and there is no choice for black to not trade it
+    b.insert(0,current_occupant) 
+    
+    #we collect a list with the trade scores for each move one by one, starting with the first value directly after a took the current piece on the attacked field
+    trade_score = [b[0]] #first we gain the current occupant piece
+    
+    #then we loop over a
+    for i, a_val in enumerate(a):
+        trade_score += [trade_score[-1]-a_val] #we lose the value of the piece which last took from black
         
-        pass
+        #if black still has pieces to trade, we gain these (given us having enough pieces to trade, see len block below)
+        if i+1 < len(b):
+            trade_score += [trade_score[-1]+b[i+1]]
+        
+        else:
+            #if we weren't done looping over a when black did not have any pieces left
+            if i < len(a):
+                del trade_score[-1] #we remove our last loss since black actually could not have claimed the piece back
+            
+            break
+    
+    #if white has less pieces overall, then we weren't able to take blacks last occupant piece after all
+    if len(a) < len(b):
+        del trade_score[-1]
+    
+    #now all that is left is to find the value at which either party would not trade further
+    #white and black will only trade equally or with a gain
+    #so this means for all uneven/white moves, we only do them if the next white move i+2 yields a higher or equal value
+    #if no i+2 field exists, we do not take since white has less pieces than black and would just lose a piece for free
+    #for even/black moves, we only do them if at i+2 our value is equal or lower (since viewing from white perspective)
+    #if no i+2 field exists we do not take
+    #since black has the last say in even indices, we move one index further if that yields a lower or equal value
+    
+    idx = 0
+    for i, val in enumerate(trade_score):
+        #white moves
+        if i % 2 == 1:
+            #we test if i+2 exists
+            if i+2 < len(trade_score):
+                #we test i+2 value
+                if val <= trade_score[i+2]:
+                    idx += 1
+                    
+                else:
+                    break
+            else:
+                break
+        
+        #black moves
+        elif i % 2 == 0:
+            #we test if i+2 exists
+            if i+2 < len(trade_score):
+                #we test i+2 value
+                if val >= trade_score[i+2]:
+                    idx += 1
+                    
+                else:
+                    break
+                    
+    #we finally make another move for black if it is advantageous for black and possible
+    if idx % 2 == 0 and idx < len(trade_score):
+        if trade_score[idx] > trade_score[idx+1]:
+            idx += 1
+    
+    return np.array([trade_score[idx]])
+
+def heuristic_eval(move : str, board : chess.Board):
+    '''
+    Evaluates a given move, based on a defined heuristic, for the current board.
+    The heuristic follows from a decision tree for which the root nodes contain the value of a given move.
+    The values of all legal moves should be derived from it and a probability distribution should be made based on each move's value.
+    The decision tree can be found in the directory of figures, and comments also annotate it in here; it is based on efficiency of computation.
+    '''
+    
+    value = np.zeros(1)
+    
+    move = chess.Move.from_uci(move)
+    
+    #if the dictionary of pieces contains a piece for the target field it is a capture
+    if move.to_square in board.piece_map().keys():
+        #check if the target piece is defended (if the square is attacked by opponent more than zero times)
+        if sum(board.attackers(not board.turn, move.to_square).tolist()) > 0:
+            #in case of a defense, calculate the best possible value gain by any trading chain you can force
+            value += trade_score(move.to_square, board)
+        
+        else:
+            #since the piece is undefended calculate the attacked piece value and use it as the value of the move (can range from pawn=1 to queen=9)
+            value += piece_value(board.piece_map()[move.from_square])
+        
+    #we only handle trades and captures due to computational load
+    #ignoring undefended pieces and defense counts is favorable since it still enables the model to learn from selfplay taking it's pieces in the next move    
+        
+    return np.add(value.clip(-10,10),10)
