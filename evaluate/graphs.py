@@ -61,39 +61,6 @@ def plot_model_losses(loss : list, title, label, epoch=True, color='blue'):
     
     plt.savefig(f'./figures/{title.lower().replace(" ","")}.png')
     
-
-# def times():
-#     '''
-#     ADD
-#     '''
-    
-#     times_supervised = list(pd.read_csv('./data/training_data_supervised.csv',index_col='Epoch')['Runtime'])
-#     times_montecarlo = list(pd.read_csv('./data/training_data_montecarlo.csv',index_col='Episode')['Runtime'])
-#     times_ddpg = list(pd.read_csv('./data/training_data_ddpg.csv',index_col='Epoch')['Runtime'])
-    
-#     measurements = ('Average Epoch\ntime (min)', 'Total training time')
-    
-#     cmap = {'Supervised model' : 'blue', 'Monte Carlo model' : 'red', 'DDPG model' : 'green'}
-    
-#     data = {
-#         'Supervised model' : np.array(np.mean([times_supervised]),np.sum([times_supervised])),
-#         'Monte Carlo model' : np.array(np.mean([times_montecarlo]),np.sum([times_montecarlo])),
-#         'DDPG model' : np.array(np.mean([times_ddpg]),np.sum([times_ddpg]))
-#             }
-    
-#     width = 0.5
-#     fig, ax = plt.subplots()
-#     bottom = np.zeros(2)
-    
-#     for key, val in data.items():
-#         p = ax.bar(measurements, val, width, label=key, bottom=bottom, color=cmap[key])
-#         bottom += val
-
-#     ax.set_title("Training time statistics between models")
-#     ax.legend(loc="upper right")
-    
-#     plt.savefig(f'./figures/trainingtimes.png')
-    
 def stockfish_performance():
     df = pd.read_csv('./data/stockfish_vs.csv',index_col=None)
     
@@ -114,8 +81,8 @@ def stockfish_performance():
     plt.set_cmap('viridis')
     plt.style.use('bmh')
 
-    x = np.arange(len(models))  # the label locations
-    width = 0.25  # the width of the bars
+    x = np.arange(len(models))
+    width = 0.25
     multiplier = 0
 
     fig, ax = plt.subplots(layout='constrained')
@@ -126,7 +93,6 @@ def stockfish_performance():
         ax.bar_label(rects, padding=3)
         multiplier += 1
 
-    # Add some text for labels, title and custom x-axis tick labels, etc.
     ax.set_ylabel('Average move count')
     ax.set_title('Average move counts per model')
     ax.set_xticks(x + width, models)
@@ -202,10 +168,6 @@ def draw_all_graphs():
     plot_model_losses(losses['montecarlo'][0], 'Training loss of montecarlo model per episode', 'Montecarlo Model', epoch=False, color='red')
     plot_model_losses(losses['ddpg'][0], 'Training loss of DDPG model per epoch', 'DDPG Model', epoch=True, color='green')
     
-    # times() #faulty
-    
     stockfish_performance()
     
     mcts_performance()
-        
-#df.groupby('Model')['Move Count'].mean()

@@ -124,7 +124,5 @@ def model_vs_stockfish(model_name, stockfish_path, n=1):
             data = pd.concat([data,appendix],axis=0)
             data.to_csv('./data/stockfish_vs.csv',index=None)
     
-    #later implement functionality for specific elo and mcts on and off in eval script
-    
     if n > 1:
         model_vs_stockfish(model_name, stockfish_path, n=n-1)
